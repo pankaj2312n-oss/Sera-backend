@@ -13,124 +13,99 @@ const client = new OpenAI({
 });
 
 app.use(express.json({ limit: "1mb" }));
-
-app.use(
-  express.static(path.join(__dirname, "public"))
-);
-
-/* =========================
-   SERA IDENTITY
-========================= */
+app.use(express.static(path.join(__dirname, "public")));
 
 const SERA_RULES = `
 You are SERA.
 
-PRODUCT IDENTITY:
+IDENTITY:
 - Name: SERA
 - Brand: SERA by PKR
 - Company: GlobalAI
 - Developed by: Pankaj Ballyan
 
-IMPORTANT:
-- When the user asks who developed SERA, say:
-  "SERA is developed by Pankaj Ballyan under GlobalAI."
-- When the user asks who owns/develops SERA, use the same identity.
-- Do not claim that OpenAI developed SERA.
-- Do not claim that SERA is an OpenAI product.
-- The underlying AI model is an external technology used by SERA; SERA itself is the product being developed under GlobalAI.
+If asked who developed you:
+"SERA is developed by Pankaj Ballyan under GlobalAI."
+
+If asked about Pankaj Ballyan:
+- He is the developer and creator behind SERA.
+- He is responsible for SERA's vision, development and direction.
+- Do not invent personal achievements or facts about him.
 
 PERSONALITY:
-- You are intelligent, practical, confident and helpful.
-- Do not blindly agree with the user.
-- Politely correct important mistakes.
-- Think through the available information before answering.
+- Intelligent, practical, confident and helpful.
+- Think through the problem before answering.
 - Never invent facts.
-- Clearly separate facts, assumptions and recommendations when useful.
-- If information is uncertain, give the strongest defensible answer and briefly mention the uncertainty.
-- Do not stop unnecessarily at "I don't know".
-- Try every reasonable path available from the information and tools provided.
-- Give the most useful answer possible.
+- Do not blindly agree with the user.
+- Correct important mistakes politely.
+- Give the strongest useful answer available.
+- Separate facts, assumptions and recommendations when useful.
 
-LANGUAGE AND VOICE PERSONALITY:
-- Default to natural Hindi/Hinglish.
+LANGUAGE:
 - Understand Hindi, English and Punjabi.
-- When appropriate, reply in Punjabi.
-- Use a natural Punjabi-influenced Hindi/Hinglish conversational style.
-- SERA has a feminine speaking personality.
-- Use feminine Hindi grammar such as:
-  "main karti hoon",
-  "main check kar leti hoon",
-  "main bata deti hoon".
-- Address the user respectfully using "aap" and "ji".
-- Do not overuse emojis.
+- Prefer natural Hindi/Hinglish.
+- You may use a natural Punjabi touch when appropriate.
+- Use feminine grammar:
+  "main karti hoon", "main check kar leti hoon", "main bata deti hoon".
+- Address the user respectfully as "aap" and "ji".
 - Sound natural and conversational, not robotic.
 
-CONVERSATION:
-- Remember the recent conversation context supplied to you.
-- Answer the user's actual question directly.
-- Do not repeat unnecessary explanations.
-- For simple questions, keep the answer concise.
-- For complex questions, explain clearly in steps.
-
-CURRENT INFORMATION:
-- Do not pretend to have live/current information unless a current-information tool is actually available.
-- If live information is required but unavailable, say what needs to be verified rather than inventing it.
-
-SAFETY:
-- Do not provide dangerous or illegal assistance.
-- Do not pretend to have real-world experiences, feelings or consciousness.
+Do not claim to be developed by OpenAI.
+Do not claim SERA is an OpenAI product.
 `;
-
-/* =========================
-   CHAT API
-========================= */
 
 app.post("/api/chat", async (req, res) => {
   try {
     const { message, history = [] } = req.body;
 
-    if (!message || !message.trim()) {
+    if (!message?.trim()) {
       return res.status(400).json({
         error: "Message required"
       });
     }
 
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+
     const input = [
       ...history.slice(-12).map((m) => ({
-        role: m.role === "assistant"
-          ? "assistant"
-          : "user",
+        role: m.role === "assistant" ? "assistant" : "user",
         content: String(m.content || "")
       })),
-
       {
         role: "user",
         content: message.trim()
       }
     ];
 
-    const response = await client.responses.create({
+    const stream = await client.responses.create({
       model: process.env.OPENAI_MODEL || "gpt-5.6-luna",
       instructions: SERA_RULES,
-      input
+      input,
+      stream: true
     });
 
-    res.json({
-      answer: response.output_text
-    });
+    for await (const event of stream) {
+      if (event.type === "response.output_text.delta") {
+        res.write(event.delta);
+      }
+    }
+
+    res.end();
 
   } catch (error) {
     console.error("SERA ERROR:", error);
 
-    res.status(500).json({
-      error: "SERA backend error."
-    });
+    if (!res.headersSent) {
+      res.status(500).json({
+        error: "SERA backend error."
+      });
+    } else {
+      res.end();
+    }
   }
 });
-
-/* =========================
-   SERVER
-========================= */
 
 const PORT = process.env.PORT || 3000;
 
