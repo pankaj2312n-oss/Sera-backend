@@ -1,51 +1,93 @@
 const form = document.querySelector("#form");
 const input = document.querySelector("#input");
 const chat = document.querySelector("#chat");
+
 const history = [];
 
-function addMessage(role, text) {
+function addMessage(role, text = "") {
   const el = document.createElement("div");
   el.className = `msg ${role}`;
-  el.innerHTML = `<b>${role === "user" ? "YOU" : "SERA"}</b><p></p>`;
+
+  const name = role === "user" ? "YOU" : "SERA";
+
+  el.innerHTML = `
+    <b>${name}</b>
+    <p></p>
+  `;
+
   el.querySelector("p").textContent = text;
   chat.appendChild(el);
-  el.scrollIntoView({ behavior: "smooth", block: "end" });
+
+  chat.scrollTo({
+    top: chat.scrollHeight,
+    behavior: "smooth"
+  });
+
+  return el;
 }
 
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
+
   const message = input.value.trim();
+
   if (!message) return;
 
   addMessage("user", message);
+
   input.value = "";
   input.disabled = true;
-  form.querySelector("button").disabled = true;
 
-  const placeholder = document.createElement("div");
-  placeholder.className = "msg sera";
-  placeholder.innerHTML = "<b>SERA</b><p>Thinking…</p>";
-  chat.appendChild(placeholder);
+  const button = form.querySelector("button");
+  button.disabled = true;
+
+  const seraMessage = addMessage("sera", "Thinking…");
+  const seraText = seraMessage.querySelector("p");
 
   try {
     const res = await fetch("/api/chat", {
       method: "POST",
-      headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({ message, history })
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        message,
+        history
+      })
     });
 
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Request failed");
 
-    placeholder.querySelector("p").textContent = data.answer;
+    if (!res.ok) {
+      throw new Error(data.error || "Request failed");
+    }
 
-    history.push({role:"user", content:message});
-    history.push({role:"assistant", content:data.answer});
-  } catch (err) {
-    placeholder.querySelector("p").textContent = "Error: " + err.message;
+    /*
+      Current backend returns the complete answer.
+      This UI displays it immediately when received.
+    */
+
+    seraText.textContent = data.answer || "I couldn't generate a response.";
+
+    history.push({
+      role: "user",
+      content: message
+    });
+
+    history.push({
+      role: "assistant",
+      content: data.answer
+    });
+
+  } catch (error) {
+    console.error(error);
+
+    seraText.textContent =
+      "Sorry ji, something went wrong. Please try again.";
+
   } finally {
     input.disabled = false;
-    form.querySelector("button").disabled = false;
+    button.disabled = false;
     input.focus();
   }
 });
