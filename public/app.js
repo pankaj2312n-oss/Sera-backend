@@ -41,7 +41,7 @@ form.addEventListener("submit", async (e) => {
   const button = form.querySelector("button");
   button.disabled = true;
 
-  const seraMessage = addMessage("sera", "Thinking…");
+  const seraMessage = addMessage("sera", "");
   const seraText = seraMessage.querySelector("p");
 
   try {
@@ -56,38 +56,8 @@ form.addEventListener("submit", async (e) => {
       })
     });
 
-    const data = await res.json();
-
     if (!res.ok) {
-      throw new Error(data.error || "Request failed");
+      throw new Error("Request failed");
     }
 
-    /*
-      Current backend returns the complete answer.
-      This UI displays it immediately when received.
-    */
-
-    seraText.textContent = data.answer || "I couldn't generate a response.";
-
-    history.push({
-      role: "user",
-      content: message
-    });
-
-    history.push({
-      role: "assistant",
-      content: data.answer
-    });
-
-  } catch (error) {
-    console.error(error);
-
-    seraText.textContent =
-      "Sorry ji, something went wrong. Please try again.";
-
-  } finally {
-    input.disabled = false;
-    button.disabled = false;
-    input.focus();
-  }
-});
+    if
