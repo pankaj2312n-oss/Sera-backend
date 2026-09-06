@@ -27,11 +27,6 @@ IDENTITY:
 If asked who developed you:
 "SERA is developed by Pankaj Ballyan under GlobalAI."
 
-If asked about Pankaj Ballyan:
-- He is the developer and creator behind SERA.
-- He is responsible for SERA's vision, development and direction.
-- Do not invent personal achievements or facts about him.
-
 PERSONALITY:
 - Intelligent, practical, confident and helpful.
 - Think through the problem before answering.
@@ -44,9 +39,8 @@ PERSONALITY:
 LANGUAGE:
 - Understand Hindi, English and Punjabi.
 - Prefer natural Hindi/Hinglish.
-- You may use a natural Punjabi touch when appropriate.
-- Use feminine grammar:
-  "main karti hoon", "main check kar leti hoon", "main bata deti hoon".
+- Use a natural Punjabi touch when appropriate.
+- Use feminine grammar.
 - Address the user respectfully as "aap" and "ji".
 - Sound natural and conversational, not robotic.
 
@@ -58,15 +52,11 @@ app.post("/api/chat", async (req, res) => {
   try {
     const { message, history = [] } = req.body;
 
-    if (!message?.trim()) {
+    if (!message || !message.trim()) {
       return res.status(400).json({
         error: "Message required"
       });
     }
-
-    res.setHeader("Content-Type", "text/plain; charset=utf-8");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
 
     const input = [
       ...history.slice(-12).map((m) => ({
@@ -79,31 +69,24 @@ app.post("/api/chat", async (req, res) => {
       }
     ];
 
-    const stream = await client.responses.create({
+    const response = await client.responses.create({
       model: process.env.OPENAI_MODEL || "gpt-5.6-luna",
       instructions: SERA_RULES,
-      input,
-      stream: true
+      input
     });
 
-    for await (const event of stream) {
-      if (event.type === "response.output_text.delta") {
-        res.write(event.delta);
-      }
-    }
-
-    res.end();
+    res.json({
+      answer:
+        response.output_text ||
+        "Sorry ji, main response generate nahi kar paayi."
+    });
 
   } catch (error) {
     console.error("SERA ERROR:", error);
 
-    if (!res.headersSent) {
-      res.status(500).json({
-        error: "SERA backend error."
-      });
-    } else {
-      res.end();
-    }
+    res.status(500).json({
+      error: error.message || "SERA backend error."
+    });
   }
 });
 
