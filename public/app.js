@@ -41,7 +41,7 @@ form.addEventListener("submit", async (e) => {
   const button = form.querySelector("button");
   button.disabled = true;
 
-  const seraMessage = addMessage("sera", "Thinking…");
+  const seraMessage = addMessage("sera", "Connecting to SERA…");
   const seraText = seraMessage.querySelector("p");
 
   try {
@@ -51,18 +51,35 @@ form.addEventListener("submit", async (e) => {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        message: message,
-        history: history
+        message,
+        history
       })
     });
 
-    const data = await res.json();
+    const raw = await res.text();
 
-    if (!res.ok) {
-      throw new Error(data.error || "Request failed");
+    console.log("SERA STATUS:", res.status);
+    console.log("SERA RESPONSE:", raw);
+
+    let data;
+
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      throw new Error(
+        `Server returned invalid response: ${raw.slice(0, 300)}`
+      );
     }
 
-    const answer = data.answer || "Sorry ji, response nahi mila.";
+    if (!res.ok) {
+      throw new Error(data.error || `Server error ${res.status}`);
+    }
+
+    const answer = data.answer;
+
+    if (!answer) {
+      throw new Error("Server returned no answer.");
+    }
 
     seraText.textContent = answer;
 
@@ -80,7 +97,7 @@ form.addEventListener("submit", async (e) => {
     console.error("SERA ERROR:", error);
 
     seraText.textContent =
-      "Sorry ji, SERA se response nahi aa paaya.";
+      "ERROR: " + error.message;
 
   } finally {
     input.disabled = false;
