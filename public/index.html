@@ -1,34 +1,104 @@
 <!doctype html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  >
+
   <title>SERA — AI Assistant</title>
+
   <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
+
   <main class="app">
+
     <header class="header">
+
       <div>
         <h1>SERA</h1>
         <p>AI Assistant</p>
       </div>
-      <span class="status">● Online</span>
+
+      <span class="status">
+        ● Online
+      </span>
+
     </header>
 
+
     <section id="chat" class="chat">
+
       <div class="msg sera">
+
         <b>SERA</b>
-        <p>Haan ji, main SERA hoon. Aap kya poochna chahte hain?</p>
+
+        <p>
+          Haan ji, main SERA hoon.
+          Aap kya poochna chahte hain?
+        </p>
+
       </div>
+
     </section>
 
+
+    <!-- VOICE STATUS -->
+
+    <div
+      id="voiceStatus"
+      class="voice-status"
+    >
+      Voice assistant ready
+    </div>
+
+
+    <!-- COMPOSER -->
+
     <form id="form" class="composer">
-      <input id="input" type="text" placeholder="Message SERA…" autocomplete="off">
-      <button type="submit">Send</button>
+
+      <button
+        type="button"
+        id="voiceButton"
+        class="voice-button"
+        aria-label="Start voice assistant"
+      >
+        🎙️
+      </button>
+
+      <input
+        id="input"
+        type="text"
+        placeholder="Message SERA…"
+        autocomplete="off"
+      >
+
+      <button
+        type="submit"
+      >
+        Send
+      </button>
+
     </form>
+
+
+    <!-- AUDIO OUTPUT -->
+
+    <audio
+      id="remoteAudio"
+      autoplay
+    ></audio>
+
   </main>
 
+
   <script src="app.js"></script>
+
 </body>
+
 </html>
