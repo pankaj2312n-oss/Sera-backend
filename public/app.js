@@ -18,10 +18,7 @@ function addMessage(role, text = "") {
   el.querySelector("p").textContent = text;
   chat.appendChild(el);
 
-  chat.scrollTo({
-    top: chat.scrollHeight,
-    behavior: "smooth"
-  });
+  chat.scrollTop = chat.scrollHeight;
 
   return el;
 }
@@ -41,8 +38,10 @@ form.addEventListener("submit", async (e) => {
   const button = form.querySelector("button");
   button.disabled = true;
 
-  const seraMessage = addMessage("sera", "Connecting to SERA…");
+  const seraMessage = addMessage("sera", "");
   const seraText = seraMessage.querySelector("p");
+
+  let answer = "";
 
   try {
     const res = await fetch("/api/chat", {
@@ -56,30 +55,37 @@ form.addEventListener("submit", async (e) => {
       })
     });
 
-    const raw = await res.text();
-
-    console.log("SERA STATUS:", res.status);
-    console.log("SERA RESPONSE:", raw);
-
-    let data;
-
-    try {
-      data = JSON.parse(raw);
-    } catch {
-      throw new Error(
-        `Server returned invalid response: ${raw.slice(0, 300)}`
-      );
-    }
-
     if (!res.ok) {
-      throw new Error(data.error || `Server error ${res.status}`);
+      const errorText = await res.text();
+      throw new Error(errorText || `Server error: ${res.status}`);
     }
 
-    const answer = data.answer;
-
-    if (!answer) {
-      throw new Error("Server returned no answer.");
+    if (!res.body) {
+      throw new Error("Streaming not supported by browser.");
     }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+
+    while (true) {
+      const { value, done } = await reader.read();
+
+      if (done) break;
+
+      const chunk = decoder.decode(value, {
+        stream: true
+      });
+
+      answer += chunk;
+
+      // Live streaming text
+      seraText.textContent = answer;
+
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    // Flush remaining decoder data
+    answer += decoder.decode();
 
     seraText.textContent = answer;
 
@@ -97,7 +103,7 @@ form.addEventListener("submit", async (e) => {
     console.error("SERA ERROR:", error);
 
     seraText.textContent =
-      "ERROR: " + error.message;
+      "Sorry ji, error aa gaya: " + error.message;
 
   } finally {
     input.disabled = false;
