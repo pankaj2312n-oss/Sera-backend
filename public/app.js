@@ -13,19 +13,16 @@ let voiceDataChannel = null;
 let localStream = null;
 
 
-// --------------------------------
+// ========================================
 // CHAT UI
-// --------------------------------
+// ========================================
 
 function addMessage(role, text = "") {
-
   const el = document.createElement("div");
 
   el.className = `msg ${role}`;
 
-  const name = role === "user"
-    ? "YOU"
-    : "SERA";
+  const name = role === "user" ? "YOU" : "SERA";
 
   el.innerHTML = `
     <b>${name}</b>
@@ -35,19 +32,17 @@ function addMessage(role, text = "") {
   el.querySelector("p").textContent = text;
 
   chat.appendChild(el);
-
   chat.scrollTop = chat.scrollHeight;
 
   return el;
 }
 
 
-// --------------------------------
+// ========================================
 // TEXT CHAT
-// --------------------------------
+// ========================================
 
 form.addEventListener("submit", async (e) => {
-
   e.preventDefault();
 
   const message = input.value.trim();
@@ -65,39 +60,28 @@ form.addEventListener("submit", async (e) => {
 
   button.disabled = true;
 
-  const seraMessage = addMessage(
-    "sera",
-    ""
-  );
+  const seraMessage = addMessage("sera", "");
 
-  const seraText =
-    seraMessage.querySelector("p");
+  const seraText = seraMessage.querySelector("p");
 
   let answer = "";
 
   try {
+    const response = await fetch("/api/chat", {
+      method: "POST",
 
-    const response = await fetch(
-      "/api/chat",
-      {
-        method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
 
-        headers: {
-          "Content-Type":
-            "application/json"
-        },
-
-        body: JSON.stringify({
-          message,
-          history
-        })
-      }
-    );
+      body: JSON.stringify({
+        message,
+        history
+      })
+    });
 
     if (!response.ok) {
-
-      const errorText =
-        await response.text();
+      const errorText = await response.text();
 
       throw new Error(
         errorText ||
@@ -105,14 +89,15 @@ form.addEventListener("submit", async (e) => {
       );
     }
 
-    const reader =
-      response.body.getReader();
+    if (!response.body) {
+      throw new Error("Streaming supported nahi hai.");
+    }
 
-    const decoder =
-      new TextDecoder("utf-8");
+    const reader = response.body.getReader();
+
+    const decoder = new TextDecoder("utf-8");
 
     while (true) {
-
       const {
         value,
         done
@@ -120,24 +105,20 @@ form.addEventListener("submit", async (e) => {
 
       if (done) break;
 
-      const chunk =
-        decoder.decode(value, {
-          stream: true
-        });
+      const chunk = decoder.decode(value, {
+        stream: true
+      });
 
       answer += chunk;
 
-      seraText.textContent =
-        answer;
+      seraText.textContent = answer;
 
-      chat.scrollTop =
-        chat.scrollHeight;
+      chat.scrollTop = chat.scrollHeight;
     }
 
     answer += decoder.decode();
 
-    seraText.textContent =
-      answer;
+    seraText.textContent = answer;
 
     history.push({
       role: "user",
@@ -150,36 +131,46 @@ form.addEventListener("submit", async (e) => {
     });
 
   } catch (error) {
-
-    console.error(error);
+    console.error("TEXT ERROR:", error);
 
     seraText.textContent =
       "Sorry ji, error aa gaya: " +
       error.message;
 
   } finally {
-
     input.disabled = false;
     button.disabled = false;
 
     input.focus();
   }
-
 });
 
 
-// --------------------------------
-// START VOICE
-// --------------------------------
+// ========================================
+// VOICE START
+// ========================================
 
 async function startVoice() {
 
   try {
 
-    voiceStatus.textContent =
-      "🎙️ Mic permission maang rahi hoon…";
+    setVoiceStatus(
+      "🎙️ Microphone permission maang rahi hoon..."
+    );
 
     voiceButton.disabled = true;
+
+
+    // STEP 1 — MICROPHONE
+
+    if (!navigator.mediaDevices ||
+        !navigator.mediaDevices.getUserMedia) {
+
+      throw new Error(
+        "Browser microphone/WebRTC support nahi karta."
+      );
+
+    }
 
     localStream =
       await navigator.mediaDevices.getUserMedia({
@@ -187,14 +178,49 @@ async function startVoice() {
       });
 
 
+    setVoiceStatus(
+      "✅ Microphone connected..."
+    );
+
+
+    // STEP 2 — PEER CONNECTION
+
     peerConnection =
       new RTCPeerConnection();
 
 
-    // Microphone audio
+    peerConnection.onconnectionstatechange =
+      () => {
+
+        console.log(
+          "Connection state:",
+          peerConnection.connectionState
+        );
+
+        setVoiceStatus(
+          "🔗 Connection: " +
+          peerConnection.connectionState
+        );
+
+      };
+
+
+    peerConnection.oniceconnectionstatechange =
+      () => {
+
+        console.log(
+          "ICE state:",
+          peerConnection.iceConnectionState
+        );
+
+      };
+
+
+    // STEP 3 — ADD MICROPHONE
+
     localStream
       .getTracks()
-      .forEach(track => {
+      .forEach((track) => {
 
         peerConnection.addTrack(
           track,
@@ -204,21 +230,40 @@ async function startVoice() {
       });
 
 
-    // SERA audio output
+    // STEP 4 — RECEIVE SERA AUDIO
+
     peerConnection.ontrack =
       (event) => {
+
+        console.log(
+          "🔊 SERA audio track received"
+        );
 
         remoteAudio.srcObject =
           event.streams[0];
 
-        remoteAudio.play().catch(
-          () => {}
-        );
+        remoteAudio.play()
+          .then(() => {
+
+            console.log(
+              "🔊 Audio playback started"
+            );
+
+          })
+          .catch((error) => {
+
+            console.error(
+              "Audio playback error:",
+              error
+            );
+
+          });
 
       };
 
 
-    // Data channel
+    // STEP 5 — DATA CHANNEL
+
     voiceDataChannel =
       peerConnection.createDataChannel(
         "oai-events"
@@ -228,16 +273,51 @@ async function startVoice() {
     voiceDataChannel.onopen =
       () => {
 
-        voiceStatus.textContent =
-          "🟢 SERA listening…";
+        console.log(
+          "✅ Data channel OPEN"
+        );
+
+        setVoiceStatus(
+          "🟢 SERA listening..."
+        );
 
         sendVoiceSessionUpdate();
 
       };
 
 
+    voiceDataChannel.onclose =
+      () => {
+
+        console.log(
+          "Data channel closed"
+        );
+
+      };
+
+
+    voiceDataChannel.onerror =
+      (error) => {
+
+        console.error(
+          "Data channel error:",
+          error
+        );
+
+        setVoiceStatus(
+          "❌ Data channel error"
+        );
+
+      };
+
+
     voiceDataChannel.onmessage =
       (event) => {
+
+        console.log(
+          "VOICE EVENT:",
+          event.data
+        );
 
         try {
 
@@ -249,7 +329,7 @@ async function startVoice() {
         } catch (error) {
 
           console.log(
-            "Voice event:",
+            "Non JSON voice event:",
             event.data
           );
 
@@ -258,87 +338,165 @@ async function startVoice() {
       };
 
 
+    // STEP 6 — CREATE OFFER
+
+    setVoiceStatus(
+      "📡 WebRTC offer create kar rahi hoon..."
+    );
+
     const offer =
-      await peerConnection
-        .createOffer();
-
-    await peerConnection
-      .setLocalDescription(offer);
+      await peerConnection.createOffer();
 
 
-    // Wait for ICE gathering
+    await peerConnection.setLocalDescription(
+      offer
+    );
+
+
+    // STEP 7 — WAIT ICE
+
+    setVoiceStatus(
+      "📡 Network connection prepare ho raha hai..."
+    );
+
     await waitForIceGathering();
 
 
+    console.log(
+      "LOCAL SDP:",
+      peerConnection.localDescription.sdp
+    );
+
+
+    // STEP 8 — SEND SDP TO SERVER
+
+    setVoiceStatus(
+      "☁️ SERA server se connect ho rahi hoon..."
+    );
+
     const response =
-      await fetch(
-        "/api/realtime",
-        {
-          method: "POST",
+      await fetch("/api/realtime", {
 
-          headers: {
-            "Content-Type":
-              "application/sdp"
-          },
+        method: "POST",
 
-          body:
-            peerConnection
-              .localDescription
-              .sdp
-        }
-      );
+        headers: {
+          "Content-Type": "application/sdp"
+        },
+
+        body:
+          peerConnection
+            .localDescription
+            .sdp
+
+      });
 
 
-    if (!response.ok) {
-
-      const error =
-        await response.text();
-
-      throw new Error(error);
-    }
+    console.log(
+      "Realtime HTTP status:",
+      response.status
+    );
 
 
     const answer =
       await response.text();
 
 
-    await peerConnection
-      .setRemoteDescription({
-        type: "answer",
-        sdp: answer
-      });
+    console.log(
+      "Realtime server response:",
+      answer
+    );
 
 
-    voiceStatus.textContent =
-      "🟢 SERA voice assistant active";
+    // IMPORTANT:
+    // ERROR KO HIDE NAHI KARENGE
 
-    voiceButton.textContent =
-      "🔴";
+    if (!response.ok) {
+
+      throw new Error(
+        `Realtime server error ${response.status}: ${answer}`
+      );
+
+    }
+
+
+    if (!answer) {
+
+      throw new Error(
+        "Realtime server ne empty SDP answer diya."
+      );
+
+    }
+
+
+    // STEP 9 — REMOTE DESCRIPTION
+
+    setVoiceStatus(
+      "🔗 SERA voice connection establish kar rahi hai..."
+    );
+
+
+    await peerConnection.setRemoteDescription({
+
+      type: "answer",
+
+      sdp: answer
+
+    });
+
+
+    console.log(
+      "✅ Remote description set"
+    );
+
+
+    setVoiceStatus(
+      "🟢 SERA voice assistant active — boliye ji..."
+    );
+
+
+    voiceButton.textContent = "🔴";
+
 
   } catch (error) {
 
     console.error(
-      "Voice error:",
-      error
+      "========== VOICE ERROR =========="
     );
 
-    voiceStatus.textContent =
-      "❌ Voice start nahi hua: " +
-      error.message;
+    console.error(error);
 
-    stopVoice();
+    console.error(
+      "Message:",
+      error.message
+    );
+
+    console.error(
+      "================================="
+    );
+
+
+    // ERROR AB SCREEN PAR RAHEGA
+
+    setVoiceStatus(
+      "❌ " + error.message
+    );
+
+
+    cleanupVoice();
+
 
   } finally {
 
     voiceButton.disabled = false;
 
   }
+
 }
 
 
-// --------------------------------
-// SESSION CONFIG
-// --------------------------------
+// ========================================
+// VOICE SESSION
+// ========================================
 
 function sendVoiceSessionUpdate() {
 
@@ -346,58 +504,109 @@ function sendVoiceSessionUpdate() {
     !voiceDataChannel ||
     voiceDataChannel.readyState !== "open"
   ) {
+
+    console.log(
+      "Data channel open nahi hai."
+    );
+
     return;
+
   }
 
 
-  voiceDataChannel.send(
-    JSON.stringify({
-      type: "session.update",
+  const event = {
 
-      session: {
+    type: "session.update",
 
-        instructions: `
+    session: {
+
+      instructions: `
+
 You are SERA.
 
-Speak naturally in Hindi/Hinglish
-with a natural Punjabi touch.
+Speak naturally in Hindi/Hinglish.
+
+Use a natural Punjabi touch when appropriate.
 
 Use feminine conversational grammar.
 
-Address the user as "aap" and "ji".
+Always address the user respectfully as "aap" and "ji".
 
-Be warm, intelligent and practical.
+Be warm, intelligent, practical and confident.
 
 Do not sound robotic.
-        `,
 
-        turn_detection: {
-          type: "semantic_vad",
-          eagerness: "auto",
-          create_response: true,
-          interrupt_response: true
-        }
+Think before answering.
+
+Never invent facts.
+
+If the user is wrong, politely correct them.
+
+Keep your speech natural and conversational.
+
+`,
+
+      turn_detection: {
+
+        type: "semantic_vad",
+
+        eagerness: "auto",
+
+        create_response: true,
+
+        interrupt_response: true
 
       }
-    })
+
+    }
+
+  };
+
+
+  console.log(
+    "Sending session update..."
+  );
+
+
+  voiceDataChannel.send(
+    JSON.stringify(event)
   );
 
 }
 
 
-// --------------------------------
+// ========================================
 // VOICE EVENTS
-// --------------------------------
+// ========================================
 
 function handleVoiceEvent(data) {
+
+  console.log(
+    "SERA EVENT:",
+    data.type
+  );
+
 
   if (
     data.type ===
     "input_audio_buffer.speech_started"
   ) {
 
-    voiceStatus.textContent =
-      "🎙️ SERA sun rahi hai…";
+    setVoiceStatus(
+      "🎙️ SERA sun rahi hai..."
+    );
+
+  }
+
+
+  if (
+    data.type ===
+    "input_audio_buffer.speech_stopped"
+  ) {
+
+    setVoiceStatus(
+      "🧠 SERA soch rahi hai..."
+    );
 
   }
 
@@ -407,8 +616,9 @@ function handleVoiceEvent(data) {
     "response.created"
   ) {
 
-    voiceStatus.textContent =
-      "🔊 SERA bol rahi hai…";
+    setVoiceStatus(
+      "🔊 SERA bol rahi hai..."
+    );
 
   }
 
@@ -418,8 +628,9 @@ function handleVoiceEvent(data) {
     "response.done"
   ) {
 
-    voiceStatus.textContent =
-      "🟢 SERA listening…";
+    setVoiceStatus(
+      "🟢 SERA listening..."
+    );
 
   }
 
@@ -430,25 +641,46 @@ function handleVoiceEvent(data) {
   ) {
 
     console.error(
-      "Realtime error:",
+      "REALTIME ERROR:",
       data
     );
 
-    voiceStatus.textContent =
-      "❌ Voice error";
+
+    setVoiceStatus(
+      "❌ Realtime error: " +
+      (
+        data.error?.message ||
+        "Unknown error"
+      )
+    );
 
   }
 
 }
 
 
-// --------------------------------
+// ========================================
 // ICE GATHERING
-// --------------------------------
+// ========================================
 
 function waitForIceGathering() {
 
-  return new Promise(resolve => {
+  return new Promise((resolve, reject) => {
+
+    if (
+      !peerConnection
+    ) {
+
+      reject(
+        new Error(
+          "Peer connection missing."
+        )
+      );
+
+      return;
+
+    }
+
 
     if (
       peerConnection.iceGatheringState ===
@@ -458,16 +690,27 @@ function waitForIceGathering() {
       resolve();
 
       return;
+
     }
+
+
+    let timeout;
 
 
     const checkState = () => {
 
+      console.log(
+        "ICE gathering:",
+        peerConnection.iceGatheringState
+      );
+
+
       if (
-        peerConnection
-          .iceGatheringState ===
+        peerConnection.iceGatheringState ===
         "complete"
       ) {
+
+        clearTimeout(timeout);
 
         peerConnection
           .removeEventListener(
@@ -488,20 +731,59 @@ function waitForIceGathering() {
         checkState
       );
 
+
+    timeout = setTimeout(() => {
+
+      peerConnection
+        .removeEventListener(
+          "icegatheringstatechange",
+          checkState
+        );
+
+      reject(
+        new Error(
+          "ICE gathering timeout."
+        )
+      );
+
+    }, 15000);
+
   });
 
 }
 
 
-// --------------------------------
-// STOP VOICE
-// --------------------------------
+// ========================================
+// STATUS
+// ========================================
 
-function stopVoice() {
+function setVoiceStatus(text) {
+
+  if (voiceStatus) {
+
+    voiceStatus.textContent = text;
+
+  }
+
+  console.log(
+    "VOICE STATUS:",
+    text
+  );
+
+}
+
+
+// ========================================
+// CLEANUP
+// ========================================
+
+function cleanupVoice() {
 
   if (voiceDataChannel) {
 
-    voiceDataChannel.close();
+    try {
+      voiceDataChannel.close();
+    } catch {}
 
     voiceDataChannel = null;
 
@@ -510,7 +792,9 @@ function stopVoice() {
 
   if (peerConnection) {
 
-    peerConnection.close();
+    try {
+      peerConnection.close();
+    } catch {}
 
     peerConnection = null;
 
@@ -521,8 +805,8 @@ function stopVoice() {
 
     localStream
       .getTracks()
-      .forEach(track =>
-        track.stop()
+      .forEach(
+        (track) => track.stop()
       );
 
     localStream = null;
@@ -530,18 +814,29 @@ function stopVoice() {
   }
 
 
-  voiceButton.textContent =
-    "🎙️";
-
-  voiceStatus.textContent =
-    "Voice assistant ready";
+  voiceButton.textContent = "🎙️";
 
 }
 
 
-// --------------------------------
+// ========================================
+// STOP VOICE
+// ========================================
+
+function stopVoice() {
+
+  cleanupVoice();
+
+  setVoiceStatus(
+    "Voice assistant ready"
+  );
+
+}
+
+
+// ========================================
 // VOICE BUTTON
-// --------------------------------
+// ========================================
 
 voiceButton.addEventListener(
   "click",
