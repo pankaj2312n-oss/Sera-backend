@@ -16,8 +16,8 @@ function addMessage(role, text = "") {
   `;
 
   el.querySelector("p").textContent = text;
-  chat.appendChild(el);
 
+  chat.appendChild(el);
   chat.scrollTop = chat.scrollHeight;
 
   return el;
@@ -44,28 +44,28 @@ form.addEventListener("submit", async (e) => {
   let answer = "";
 
   try {
-    const res = await fetch("/api/chat", {
+    const response = await fetch("/api/chat", {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        message,
-        history
+        message: message,
+        history: history
       })
     });
 
-    if (!res.ok) {
-      const errorText = await res.text();
-      throw new Error(errorText || `Server error: ${res.status}`);
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(errorText || `Server error: ${response.status}`);
     }
 
-    if (!res.body) {
-      throw new Error("Streaming not supported by browser.");
+    if (!response.body) {
+      throw new Error("Streaming supported nahi hai.");
     }
 
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
 
     while (true) {
       const { value, done } = await reader.read();
@@ -76,18 +76,23 @@ form.addEventListener("submit", async (e) => {
         stream: true
       });
 
-      answer += chunk;
+      if (chunk) {
+        answer += chunk;
 
-      // Live streaming text
-      seraText.textContent = answer;
+        // Live text update
+        seraText.textContent = answer;
 
-      chat.scrollTop = chat.scrollHeight;
+        chat.scrollTop = chat.scrollHeight;
+      }
     }
 
-    // Flush remaining decoder data
-    answer += decoder.decode();
+    // Remaining decoder data
+    const finalChunk = decoder.decode();
 
-    seraText.textContent = answer;
+    if (finalChunk) {
+      answer += finalChunk;
+      seraText.textContent = answer;
+    }
 
     history.push({
       role: "user",
