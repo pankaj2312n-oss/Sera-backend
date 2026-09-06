@@ -93,4 +93,16 @@ app.post("/api/chat", async (req, res) => {
 
     if (!res.headersSent) {
       res.status(500).json({
-        error: error.message || "SERA backend error
+        error: error.message || "SERA backend error."
+      });
+    } else {
+      res.end();
+    }
+  }
+});
+
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log(`SERA by PKR running on port ${PORT}`);
+});
