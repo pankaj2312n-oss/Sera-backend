@@ -9,30 +9,49 @@ import crypto from "crypto";
 const { Pool } = pg;
 
 const app = express();
+const PORT = process.env.PORT || 10000;
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-const client = new OpenAI({
+const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
+const pool = process.env.DATABASE_URL
+  ? new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false }
+    })
+  : null;
 
-// ------------------------------
-// DATABASE
-// ------------------------------
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === "production"
-    ? { rejectUnauthorized: false }
-    : false
-});
+app.use(express.json());
+app.use(express.text({ type: "application/sdp" }));
 
+const SERA_RULES = `
+You are SERA, a personal AI assistant.
 
-// Create required tables automatically
+Your core rule:
+Never stop at "I don't know".
+Think through every available path and provide the most useful answer possible.
+
+Behavior:
+- Reason carefully before answering.
+- Give the strongest defensible conclusion.
+- Separate facts, assumptions and recommendations when useful.
+- Never invent facts.
+- If information is uncertain, say so briefly.
+- Do not automatically agree with the user; politely correct mistakes.
+- Be practical, intelligent and helpful.
+- Speak naturally in Hindi/Hinglish when appropriate.
+- Use respectful "aap" and "ji".
+- Use feminine Hindi grammar for yourself, such as "main karti hoon" and "main bata deti hoon".
+- Voice style should be warm, natural and conversational with a Punjabi-flavored Hindi/Hinglish touch.
+`;
+
 async function initDatabase() {
-  if (!process.env.DATABASE_URL) {
-    console.warn("DATABASE_URL not configured.");
+  if (!pool) {
+    console.log("DATABASE_URL not configured. Database features disabled.");
     return;
   }
 
@@ -70,92 +89,40 @@ async function initDatabase() {
     ON training_examples(status, created_at);
   `);
 
-  console.log("Database ready.");
+  console.log("Database initialized.");
 }
 
+async function requireConsent(userId) {
+  if (!pool || !userId) return false;
 
-// ------------------------------
-// EXPRESS
-// ------------------------------
+  const result = await pool.query(
+    "SELECT user_id FROM consents WHERE user_id = $1",
+    [userId]
+  );
 
-app.use(express.json({ limit: "1mb" }));
-app.use(express.text({
-  type: "application/sdp",
-  limit: "2mb"
-}));
-
-app.use(express.static(path.join(__dirname, "public")));
-
-
-// ------------------------------
-// SERA RULES
-// ------------------------------
-
-const SERA_RULES = `
-You are SERA.
-
-IDENTITY:
-- Name: SERA.
-- Brand: SERA by PKR.
-- Developed by Pankaj Ballyan.
-
-PERSONALITY:
-- Intelligent, practical, confident and helpful.
-- Think through problems before answering.
-- Never invent facts.
-- Do not blindly agree.
-- Correct mistakes politely.
-- Give the strongest useful answer available.
-- Be natural and conversational.
-
-LANGUAGE:
-- Understand Hindi, English and Punjabi.
-- Prefer natural Hindi/Hinglish.
-- Use a natural Punjabi touch when appropriate.
-- Use feminine grammar.
-- Address the user respectfully as "aap" and "ji".
-
-CORE RULE:
-Never stop at "I don't know".
-Think through every available path and provide the most useful answer possible.
-
-VOICE:
-- Speak naturally and conversationally.
-- Use a warm feminine conversational style.
-- Hindi/Hinglish with a natural Punjabi touch when appropriate.
-- Do not sound robotic.
-`;
-
-
-// ------------------------------
-// HEALTH CHECK
-// ------------------------------
+  return result.rowCount > 0;
+}
 
 app.get("/api/health", async (req, res) => {
   try {
-    await pool.query("SELECT 1");
+    if (pool) {
+      await pool.query("SELECT 1");
+    }
 
     res.json({
       ok: true,
       sera: "online",
-      database: "connected"
+      database: Boolean(pool)
     });
-
   } catch (error) {
-    console.error("HEALTH ERROR:", error);
+    console.error(error);
 
     res.status(500).json({
       ok: false,
-      sera: "online",
-      database: "error"
+      error: "Database connection failed"
     });
   }
 });
-
-
-// ------------------------------
-// REGISTER / CONSENT
-// ------------------------------
 
 app.post("/api/register", async (req, res) => {
   try {
@@ -163,7 +130,13 @@ app.post("/api/register", async (req, res) => {
 
     if (consent !== true) {
       return res.status(400).json({
-        error: "Training consent is required."
+        error: "Consent is required."
+      });
+    }
+
+    if (!pool) {
+      return res.status(500).json({
+        error: "Database is not configured."
       });
     }
 
@@ -171,8 +144,7 @@ app.post("/api/register", async (req, res) => {
 
     await pool.query(
       `
-      INSERT INTO consents
-      (user_id, consent_version)
+      INSERT INTO consents (user_id, consent_version)
       VALUES ($1, $2)
       `,
       [userId, "2026-09-06"]
@@ -182,137 +154,80 @@ app.post("/api/register", async (req, res) => {
       ok: true,
       user_id: userId
     });
-
   } catch (error) {
-    console.error("REGISTER ERROR:", error);
+    console.error(error);
 
     res.status(500).json({
-      error: "Unable to register user."
+      error: "Registration failed."
     });
   }
 });
 
-
-// ------------------------------
-// TEXT CHAT
-// ------------------------------
-
 app.post("/api/chat", async (req, res) => {
   try {
-
-    const {
-      message,
-      history = [],
-      user_id,
-      session_id
-    } = req.body;
-
-    if (!message?.trim()) {
-      return res.status(400).json({
-        error: "Message required."
-      });
-    }
+    const { user_id, session_id, messages } = req.body;
 
     if (!user_id) {
-      return res.status(401).json({
-        error: "Please complete SERA training consent first."
+      return res.status(400).json({
+        error: "user_id is required."
       });
     }
 
-    // Verify consent
-    const consentResult = await pool.query(
-      `
-      SELECT user_id
-      FROM consents
-      WHERE user_id = $1
-      `,
-      [user_id]
-    );
+    const hasConsent = await requireConsent(user_id);
 
-    if (consentResult.rowCount === 0) {
+    if (!hasConsent) {
       return res.status(403).json({
-        error: "Training consent not found."
+        error: "User consent is required."
       });
     }
 
-    const currentSession =
-      session_id || crypto.randomUUID();
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({
+        error: "messages are required."
+      });
+    }
 
-    const cleanMessage = message.trim();
+    const sessionId = session_id || crypto.randomUUID();
 
-    // Save user message
-    await pool.query(
-      `
-      INSERT INTO conversations
-      (session_id, user_id, role, content)
-      VALUES ($1, $2, 'user', $3)
-      `,
-      [
-        currentSession,
-        user_id,
-        cleanMessage
-      ]
-    );
+    const latestUserMessage =
+      [...messages].reverse().find((m) => m.role === "user");
 
-    const input = [
-      ...history.slice(-12).map((m) => ({
-        role:
-          m.role === "assistant"
-            ? "assistant"
-            : "user",
-        content: String(m.content || "")
-      })),
-      {
-        role: "user",
-        content: cleanMessage
-      }
-    ];
+    if (latestUserMessage?.content && pool) {
+      await pool.query(
+        `
+        INSERT INTO conversations
+        (session_id, user_id, role, content)
+        VALUES ($1, $2, 'user', $3)
+        `,
+        [
+          sessionId,
+          user_id,
+          latestUserMessage.content
+        ]
+      );
+    }
 
-    const stream = await client.responses.create({
-      model:
-        process.env.OPENAI_MODEL ||
-        "gpt-5.6-luna",
-
+    const response = await openai.responses.create({
+      model: "gpt-5.6-luna",
       instructions: SERA_RULES,
-
-      input,
-
+      input: messages,
       stream: true
     });
 
-    res.setHeader(
-      "Content-Type",
-      "text/plain; charset=utf-8"
-    );
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
 
-    res.setHeader(
-      "Cache-Control",
-      "no-cache, no-transform"
-    );
+    let assistantText = "";
 
-    res.setHeader(
-      "X-Accel-Buffering",
-      "no"
-    );
-
-    let assistantAnswer = "";
-
-    for await (const event of stream) {
-
-      if (
-        event.type ===
-        "response.output_text.delta"
-      ) {
-
-        assistantAnswer += event.delta;
-
+    for await (const event of response) {
+      if (event.type === "response.output_text.delta") {
+        assistantText += event.delta;
         res.write(event.delta);
       }
     }
 
-    // Save assistant answer
-    if (assistantAnswer.trim()) {
-
+    if (pool && assistantText) {
       await pool.query(
         `
         INSERT INTO conversations
@@ -320,65 +235,95 @@ app.post("/api/chat", async (req, res) => {
         VALUES ($1, $2, 'assistant', $3)
         `,
         [
-          currentSession,
+          sessionId,
           user_id,
-          assistantAnswer
+          assistantText
         ]
       );
     }
 
     res.end();
-
   } catch (error) {
-
-    console.error(
-      "TEXT ERROR:",
-      error
-    );
+    console.error(error);
 
     if (!res.headersSent) {
-
       res.status(500).json({
-        error:
-          error.message ||
-          "SERA backend error."
+        error: "SERA could not process the request."
       });
-
     } else {
-
       res.end();
     }
   }
 });
 
+app.post("/api/training/request", async (req, res) => {
+  try {
+    const {
+      user_id,
+      question,
+      ideal_answer,
+      feedback
+    } = req.body;
 
-// ------------------------------
-// TRAINING REQUEST
-// ------------------------------
+    if (!user_id || !question) {
+      return res.status(400).json({
+        error: "user_id and question are required."
+      });
+    }
 
-app.post(
-  "/api/training/request",
-  async (req, res) => {
+    const hasConsent = await requireConsent(user_id);
 
-    try {
+    if (!hasConsent) {
+      return res.status(403).json({
+        error: "User consent is required."
+      });
+    }
 
-      const {
+    if (!pool) {
+      return res.status(500).json({
+        error: "Database is not configured."
+      });
+    }
+
+    const result = await pool.query(
+      `
+      INSERT INTO training_examples
+      (user_id, question, ideal_answer, feedback)
+      VALUES ($1, $2, $3, $4)
+      RETURNING id, status, created_at
+      `,
+      [
         user_id,
         question,
-        ideal_answer,
-        feedback
-      } = req.body;
+        ideal_answer || null,
+        feedback || null
+      ]
+    );
 
-      if (!user_id) {
-        return res.status(401).json({
-          error: "User not registered."
-        });
-      }
+    res.json({
+      ok: true,
+      training_example: result.rows[0]
+    });
+  } catch (error) {
+    console.error(error);
 
-      if (!question?.trim()) {
-        return res.status(400).json({
-          error: "Question required."
-        });
-      }
+    res.status(500).json({
+      error: "Training request failed."
+    });
+  }
+});
 
-      const
+app.post("/api/realtime", async (req, res) => {
+  try {
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(500).send("OPENAI_API_KEY is missing.");
+    }
+
+    const sdp = req.body;
+
+    const form = new FormData();
+
+    form.append("sdp", sdp);
+
+    form.append(
+     
