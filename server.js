@@ -214,9 +214,20 @@ app.post("/api/chat", async (req, res) => {
       stream: true
     });
 
-    res.setHeader("Content-Type", "text/plain; charset=utf-8");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
+    res.setHeader(
+      "Content-Type",
+      "text/plain; charset=utf-8"
+    );
+
+    res.setHeader(
+      "Cache-Control",
+      "no-cache"
+    );
+
+    res.setHeader(
+      "Connection",
+      "keep-alive"
+    );
 
     let assistantText = "";
 
@@ -316,7 +327,9 @@ app.post("/api/training/request", async (req, res) => {
 app.post("/api/realtime", async (req, res) => {
   try {
     if (!process.env.OPENAI_API_KEY) {
-      return res.status(500).send("OPENAI_API_KEY is missing.");
+      return res.status(500).send(
+        "OPENAI_API_KEY is missing."
+      );
     }
 
     const sdp = req.body;
@@ -326,4 +339,83 @@ app.post("/api/realtime", async (req, res) => {
     form.append("sdp", sdp);
 
     form.append(
-     
+      "session",
+      JSON.stringify({
+        type: "realtime",
+        model: "gpt-realtime-2.1",
+        voice: "marin",
+        instructions: SERA_RULES
+      })
+    );
+
+    const response = await fetch(
+      "https://api.openai.com/v1/realtime/calls",
+      {
+        method: "POST",
+        headers: {
+          Authorization:
+            `Bearer ${process.env.OPENAI_API_KEY}`
+        },
+        body: form
+      }
+    );
+
+    const text = await response.text();
+
+    if (!response.ok) {
+      console.error(
+        "Realtime API error:",
+        response.status,
+        text
+      );
+
+      return res
+        .status(response.status)
+        .send(text);
+    }
+
+    res
+      .type("application/sdp")
+      .send(text);
+
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).send(
+      "Realtime connection failed."
+    );
+  }
+});
+
+app.use(
+  express.static(
+    path.join(__dirname, "public")
+  )
+);
+
+app.get(/.*/, (req, res) => {
+  res.sendFile(
+    path.join(
+      __dirname,
+      "public",
+      "index.html"
+    )
+  );
+});
+
+initDatabase()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(
+        `SERA server running on port ${PORT}`
+      );
+    });
+  })
+  .catch((error) => {
+    console.error(
+      "Startup failed:",
+      error
+    );
+
+    process.exit(1);
+  });
